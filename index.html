@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BSC 手动卖出面板</title>
+<style>
+  :root { --bg:#0e1116; --card:#171c24; --line:#2a3240; --ink:#e8edf4; --dim:#93a1b5; --acc:#f0b90b; --red:#e5484d; --grn:#30a46c; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  .wrap { max-width:860px; margin:0 auto; padding:14px; }
+  h1 { font-size:17px; margin:2px 0 8px; }
+  .warn { background:#2a1d12; border:1px solid #6b4e16; color:#f5c86e; padding:8px 10px; border-radius:8px; font-size:12px; margin-bottom:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:10px; }
+  .card h2 { font-size:14px; margin:0 0 10px; color:var(--acc); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .row > * { flex:0 0 auto; }
+  input, select { background:#0d1015; border:1px solid var(--line); color:var(--ink); border-radius:7px; padding:8px 9px; font-size:14px; }
+  input.long { flex:1 1 320px; }
+  input.num { width:110px; }
+  button { background:#232b38; border:1px solid var(--line); color:var(--ink); border-radius:7px; padding:8px 14px; font-size:14px; cursor:pointer; }
+  button:hover { border-color:var(--acc); }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button.primary { background:var(--acc); color:#181206; font-weight:700; border-color:var(--acc); }
+  button.fire { background:var(--red); border-color:var(--red); color:#fff; font-weight:700; font-size:16px; padding:12px 26px; }
+  .kv { display:grid; grid-template-columns:110px 1fr; gap:3px 10px; font-size:13px; }
+  .kv b { color:var(--dim); font-weight:400; }
+  .big { font-size:20px; font-weight:700; }
+  .dim { color:var(--dim); font-size:12px; }
+  #log { background:#0d1015; border:1px solid var(--line); border-radius:8px; height:210px; overflow:auto; padding:8px 10px; font:12px/1.65 ui-monospace,Menlo,Consolas,monospace; white-space:pre-wrap; word-break:break-all; }
+  a { color:var(--acc); }
+  .ok { color:var(--grn); } .err { color:var(--red); }
+  label.chk { display:flex; gap:6px; align-items:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>BSC 手动卖出面板（本地运行）</h1>
+  <div class="warn">⚠ 本页面只在你自己的浏览器本地运行，不上传任何数据。<b>绝不要在任何网页输入私钥或助记词</b>，签名只走你钱包的弹窗确认。只放小额热钱包。币安 Agentic 钱包（baw）连不上网页，用不了这个面板。</div>
+
+  <div class="card">
+    <h2>① 钱包</h2>
+    <div class="row">
+      <button id="btnConnect" class="primary">连接钱包</button>
+      <span id="acct" class="dim">未连接</span>
+      <span id="bnbBal" class="dim"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>② 识别合约（粘贴代币地址）</h2>
+    <div class="row">
+      <input id="tokenAddr" class="long" placeholder="0x 代币合约地址" spellcheck="false" />
+      <button id="btnDetect">识别</button>
+    </div>
+    <div class="kv" style="margin-top:10px">
+      <b>名称 / 符号</b><span id="tName">—</span>
+      <b>精度 / 总量</b><span id="tInfo">—</span>
+      <b>池子</b><span id="tPool">—</span>
+      <b>现价</b><span id="tPrice">—</span>
+      <b>我的持仓</b><span id="tBal">—</span>
+      <b>已授权额度</b><span id="tAllow">—</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>③ 卖出</h2>
+    <div class="row">
+      <input id="sellAmt" class="long" placeholder="卖出数量（代币个数）" inputmode="decimal" />
+      <button data-pct="25">25%</button>
+      <button data-pct="50">50%</button>
+      <button data-pct="75">75%</button>
+      <button data-pct="100">100%</button>
+    </div>
+    <div class="kv" style="margin:10px 0">
+      <b>实时报价</b><span id="qOut" class="big">—</span>
+      <b>预计到账</b><span id="qExp">—（已扣卖税估算）</span>
+      <b>最小到账</b><span id="qMin">—（再扣滑点，开火时按当时报价重算）</span>
+    </div>
+    <div class="row">
+      <label>卖税% <input id="taxPct" class="num" type="number" value="2" min="0" max="90" step="0.1" style="width:70px"></label>
+      <label>滑点% <input id="slipPct" class="num" type="number" value="5" min="0" max="90" step="0.5" style="width:70px"></label>
+      <label>Gas Gwei <input id="gasGwei" class="num" type="number" value="3" min="0.1" step="0.1" style="width:70px"></label>
+      <label>Gas Limit <input id="gasLimit" class="num" type="number" value="600000" step="50000" style="width:100px"></label>
+      <label>截止秒 <input id="deadSec" class="num" type="number" value="180" step="30" style="width:70px"></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button id="btnApprove">提前授权（按卖出量）</button>
+      <button id="btnDry">预演（不发交易）</button>
+      <button id="btnFire" class="fire">立即开火卖出</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <label>定时开火 <input id="fireAt" type="datetime-local"></label>
+      <button id="btnTimer">设定时</button>
+      <span id="timerState" class="dim"></span>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <label class="chk"><input id="openArm" type="checkbox"> 开盘触发：1 秒一扫，一有报价立刻卖（勾上即布防）</label>
+      <span id="openState" class="dim"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>④ 自定义 calldata（高级，可选）</h2>
+    <div class="row">
+      <input id="cdTo" class="long" placeholder="目标合约 0x..." spellcheck="false" />
+      <input id="cdVal" class="num" placeholder="BNB 数量" inputmode="decimal" style="width:110px" />
+    </div>
+    <div class="row" style="margin-top:8px">
+      <input id="cdData" class="long" placeholder="0x calldata..." spellcheck="false" />
+      <button id="btnCd">发送</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div id="log"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------- 常量 ----------
+const CHAIN_ID = 56;
+const ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E"; // PancakeSwap V2 Router
+const FACTORY = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"; // PancakeSwap V2 Factory
+const WBNB = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
+const UTOKEN = "0xcE24439F2D9C6a2289F741120FE202248B666666"; // United Stables (U)
+const RPCS = ["https://bsc-dataseed.binance.org", "https://bsc-dataseed1.binance.org", "https://bsc-dataseed2.binance.org", "https://bsc-rpc.publicnode.com"];
+let rpcIdx = 0;
+const SEL = {
+  name: "0x06fdde03", symbol: "0x95d89b41", decimals: "0x313ce567", totalSupply: "0x18160ddd",
+  balanceOf: "0x70a08231", allowance: "0xdd62ed3e", approve: "0x095ea7b3",
+  getPair: "0xe6a43905", getReserves: "0x0902f1ac", token0: "0x0dfe1681",
+  getAmountsOut: "0xd06ca61f",
+  swapTokensForTokensFoT: "0x5c11d795", // swapExactTokensForTokensSupportingFeeOnTransferTokens
+  swapTokensForETHFoT: "0x791ac947"     // swapExactTokensForETHSupportingFeeOnTransferTokens
+};
+// ---------- 工具 ----------
+const $ = id => document.getElementById(id);
+const logEl = $("log");
+function tstamp() { const d = new Date(); return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
+function log(msg, cls) { const line = document.createElement("div"); if (cls) line.className = cls; line.textContent = "[" + tstamp() + "] " + msg; logEl.appendChild(line); logEl.scrollTop = logEl.scrollHeight; }
+const pad = a => "0".repeat(24) + a.toLowerCase().replace("0x", "");
+const word = n => n.toString(16).padStart(64, "0");
+const hexToBig = h => BigInt(h);
+function fmtUnits(v, dec) {
+  v = BigInt(v); const neg = v < 0n; if (neg) v = -v;
+  const s = v.toString().padStart(dec + 1, "0");
+  const ip = s.slice(0, s.length - dec) || "0";
+  let fp = dec ? s.slice(s.length - dec) : "";
+  fp = fp.replace(/0+$/, "");
+  return (neg ? "-" : "") + ip + (fp ? "." + fp : "");
+}
+function parseUnits(str, dec) {
+  str = String(str).trim(); if (!str) return 0n;
+  const [ip, fp = ""] = str.split(".");
+  return BigInt(ip || "0") * (10n ** BigInt(dec)) + BigInt((fp + "0".repeat(dec)).slice(0, dec) || "0");
+}
+function decodeStr(ret) {
+  if (!ret || ret === "0x") return "";
+  const hex = ret.slice(2);
+  try {
+    if (hex.length >= 128) {
+      const off = Number(hexToBig("0x" + hex.slice(0, 64)));
+      const len = Number(hexToBig("0x" + hex.slice(off * 2, off * 2 + 64)));
+      const bytes = hex.slice(off * 2 + 64, off * 2 + 64 + len * 2);
+      return new TextDecoder().decode(Uint8Array.from(bytes.match(/../g).map(x => parseInt(x, 16))));
+    }
+    const bytes = hex.replace(/(00)+$/, "");
+    return new TextDecoder().decode(Uint8Array.from((bytes.match(/../g) || []).map(x => parseInt(x, 16))));
+  } catch (e) { return ""; }
+}
+// ---------- RPC（多节点轮换） ----------
+async function rpc(method, params) {
+  let lastErr;
+  for (let i = 0; i < RPCS.length; i++) {
+    const url = RPCS[(rpcIdx + i) % RPCS.length];
+    try {
+      const ctl = new AbortController(); const to = setTimeout(() => ctl.abort(), 8000);
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ctl.signal });
+      clearTimeout(to);
+      const j = await r.json();
+      if (j.error) throw new Error(j.error.message || "rpc error");
+      if ((rpcIdx + i) % RPCS.length !== rpcIdx) { rpcIdx = (rpcIdx + i) % RPCS.length; log("RPC 已切换到 " + url); }
+      return j.result;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("所有 RPC 都失败");
+}
+const ethCall = (to, data, from) => rpc("eth_call", [{ to, data, ...(from ? { from } : {}) }, "latest"]);
+
+// ---------- 状态 ----------
+let account = null;
+let token = null;   // {addr,name,symbol,dec,supply}
+let pairInfo = null; // {base:'WBNB'|'U', pair, baseAddr, baseSymbol, baseDec, reserveBase, reserveToken}
+let myBal = 0n, myAllow = 0n, lastQuote = null, firing = false;
+
+async function refreshWallet() {
+  if (!account) return;
+  const b = await rpc("eth_getBalance", [account, "latest"]);
+  $("bnbBal").textContent = "BNB: " + fmtUnits(hexToBig(b), 18);
+}
+
+async function detect() {
+  const addr = $("tokenAddr").value.trim();
+  if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) { log("合约地址格式不对", "err"); return; }
+  token = null; pairInfo = null; lastQuote = null;
+  try {
+    const [nm, sy, dc, ts] = await Promise.all([
+      ethCall(addr, SEL.name), ethCall(addr, SEL.symbol), ethCall(addr, SEL.decimals), ethCall(addr, SEL.totalSupply)
+    ]);
+    token = { addr, name: decodeStr(nm), symbol: decodeStr(sy) || "?", dec: Number(hexToBig(dc)), supply: hexToBig(ts) };
+    $("tName").textContent = token.name + " / " + token.symbol;
+    $("tInfo").textContent = token.dec + " / " + fmtUnits(token.supply, token.dec);
+    log("识别到代币 " + token.symbol + "（" + token.name + "）");
+    // 找池子：WBNB 与 U 两个都查，选储备大的
+    const cands = [];
+    for (const base of [{ a: WBNB, s: "BNB", d: 18 }, { a: UTOKEN, s: "U", d: 18 }]) {
+      const pair = await ethCall(FACTORY, SEL.getPair + pad(addr) + pad(base.a));
+      const pairAddr = "0x" + pair.slice(26);
+      if (/^0x0+$/.test(pairAddr)) continue;
+      const res = await ethCall(pairAddr, SEL.getReserves);
+      const t0 = "0x" + (await ethCall(pairAddr, SEL.token0)).slice(26);
+      const r0 = hexToBig("0x" + res.slice(2, 66)), r1 = hexToBig("0x" + res.slice(66, 130));
+      const isT0 = t0.toLowerCase() === addr.toLowerCase();
+      cands.push({ base: base.s, pair: pairAddr, baseAddr: base.a, baseDec: base.d, reserveToken: isT0 ? r0 : r1, reserveBase: isT0 ? r1 : r0 });
+    }
+    if (!cands.length) { $("tPool").textContent = "没找到 V2 池子（WBNB / U 都没有）"; log("没找到池子，可能还没开盘", "err"); }
+    else {
+      cands.sort((x, y) => (y.reserveBase > x.reserveBase ? 1 : -1));
+      pairInfo = cands[0];
+      $("tPool").textContent = pairInfo.pair + "（对 " + pairInfo.base + "）";
+      log("池子已锁定：对 " + pairInfo.base + "，储备 " + fmtUnits(pairInfo.reserveBase, pairInfo.baseDec) + " " + pairInfo.base);
+    }
+    await refreshPosition();
+  } catch (e) { log("识别失败：" + e.message, "err"); }
+}
+
+async function refreshPosition() {
+  if (!token) return;
+  if (account) {
+    myBal = hexToBig(await ethCall(token.addr, SEL.balanceOf + pad(account)));
+    myAllow = hexToBig(await ethCall(token.addr, SEL.allowance + pad(account) + pad(ROUTER)));
+    $("tBal").textContent = fmtUnits(myBal, token.dec) + " " + token.symbol;
+    $("tAllow").textContent = fmtUnits(myAllow, token.dec) + " " + token.symbol;
+  }
+  if (pairInfo && pairInfo.reserveToken > 0n) {
+    // 现价 = 储备比（1 个代币值多少计价币）
+    const p = Number(fmtUnits(pairInfo.reserveBase, pairInfo.baseDec)) / Number(fmtUnits(pairInfo.reserveToken, token.dec));
+    $("tPrice").textContent = (p > 0 ? p.toPrecision(4) : "0") + " " + pairInfo.base + " / " + token.symbol;
+  }
+}
+
+async function quote(amountIn) {
+  if (!pairInfo || amountIn <= 0n) return null;
+  const data = SEL.getAmountsOut + word(amountIn) + word(64n) + word(2n) + pad(token.addr) + pad(pairInfo.baseAddr);
+  const ret = await ethCall(ROUTER, data);
+  const hex = ret.slice(2);
+  const off = Number(hexToBig("0x" + hex.slice(0, 64)));
+  const len = Number(hexToBig("0x" + hex.slice(off * 2, off * 2 + 64)));
+  const outs = [];
+  for (let i = 0; i < len; i++) outs.push(hexToBig("0x" + hex.slice(off * 2 + 64 + i * 64, off * 2 + 128 + i * 64)));
+  return outs[outs.length - 1];
+}
+
+function currentAmounts() {
+  if (!token) return null;
+  const amtIn = parseUnits($("sellAmt").value || "0", token.dec);
+  const tax = Math.max(0, Math.min(90, Number($("taxPct").value || 0)));
+  const slip = Math.max(0, Math.min(90, Number($("slipPct").value || 0)));
+  return { amtIn, tax, slip };
+}
+function minOutFor(q, tax, slip) {
+  // 报价不含代币税：预计到账 ≈ 报价×(1-税)，最小到账再扣滑点
+  const exp = q * BigInt(Math.round((100 - tax) * 100)) / 10000n;
+  return { exp, min: exp * BigInt(Math.round((100 - slip) * 100)) / 10000n };
+}
+
+async function tickQuote() {
+  if (!token || !pairInfo) return;
+  // 刷新储备（现价）
+  try {
+    const res = await ethCall(pairInfo.pair, SEL.getReserves);
+    const t0ret = await ethCall(pairInfo.pair, SEL.token0);
+    const t0 = "0x" + t0ret.slice(26);
+    const r0 = hexToBig("0x" + res.slice(2, 66)), r1 = hexToBig("0x" + res.slice(66, 130));
+    const isT0 = t0.toLowerCase() === token.addr.toLowerCase();
+    pairInfo.reserveToken = isT0 ? r0 : r1; pairInfo.reserveBase = isT0 ? r1 : r0;
+  } catch (e) {}
+  const c = currentAmounts();
+  if (!c || c.amtIn <= 0n) { $("qOut").textContent = "—"; return; }
+  try {
+    const q = await quote(c.amtIn);
+    const prev = lastQuote; lastQuote = q;
+    if (q === null || q === 0n) { $("qOut").textContent = "无报价（池子没开或没流动性）"; return; }
+    const { exp, min } = minOutFor(q, c.tax, c.slip);
+    $("qOut").textContent = fmtUnits(q, pairInfo.baseDec) + " " + pairInfo.base;
+    $("qExp").textContent = fmtUnits(exp, pairInfo.baseDec) + " " + pairInfo.base + "（已扣卖税估算）";
+    $("qMin").textContent = fmtUnits(min, pairInfo.baseDec) + " " + pairInfo.base + "（再扣滑点，开火时按当时报价重算）";
+    // 开盘触发
+    if ($("openArm").checked && (prev === null || prev === 0n) && !firing) {
+      log("开盘触发：报价首次出现，立即开火", "ok");
+      $("openArm").checked = false; $("openState").textContent = "已触发";
+      fire();
+    }
+  } catch (e) { /* 报价失败下一秒重试，日志不刷屏 */ }
+}
+setInterval(() => { tickQuote().catch(() => {}); }, 1000);
+setInterval(() => { refreshPosition().catch(() => {}); refreshWallet().catch(() => {}); }, 5000);
+</script>
+<script>
+"use strict";
+// ---------- 钱包 ----------
+async function ensureWallet() {
+  if (!window.ethereum) { log("没检测到钱包插件/浏览器钱包，请在钱包 App 的浏览器里打开本页", "err"); throw new Error("no wallet"); }
+  const accts = await window.ethereum.request({ method: "eth_requestAccounts" });
+  account = accts[0];
+  const cid = await window.ethereum.request({ method: "eth_chainId" });
+  if (parseInt(cid, 16) !== CHAIN_ID) {
+    try { await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: "0x38" }] }); }
+    catch (e) {
+      await window.ethereum.request({ method: "wallet_addEthereumChain", params: [{ chainId: "0x38", chainName: "BNB Smart Chain", nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 }, rpcUrls: ["https://bsc-dataseed.binance.org"], blockExplorerUrls: ["https://bscscan.com"] }] });
+    }
+  }
+  $("acct").textContent = "已连接：" + account;
+  log("钱包已连接并切到 BSC：" + account, "ok");
+  await refreshWallet(); await refreshPosition();
+  return account;
+}
+if (window.ethereum && window.ethereum.on) {
+  window.ethereum.on("accountsChanged", a => { account = a[0] || null; $("acct").textContent = account ? "已连接：" + account : "未连接"; refreshPosition().catch(() => {}); });
+}
+$("btnConnect").onclick = () => ensureWallet().catch(e => log("连接失败：" + e.message, "err"));
+
+function txParams(extra) {
+  const gwei = Math.max(0.1, Number($("gasGwei").value || 3));
+  const limit = Math.max(60000, Number($("gasLimit").value || 600000));
+  return { from: account, gasPrice: "0x" + BigInt(Math.round(gwei * 1e9)).toString(16), gas: "0x" + BigInt(Math.round(limit)).toString(16), ...extra };
+}
+async function sendTx(to, data, valueHex) {
+  const h = await window.ethereum.request({ method: "eth_sendTransaction", params: [txParams({ to, data, value: valueHex || "0x0" })] });
+  log("已发出，哈希：" + h + "（https://bscscan.com/tx/" + h + "）");
+  return h;
+}
+async function waitReceipt(h, timeoutMs = 90000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const r = await rpc("eth_getTransactionReceipt", [h]);
+    if (r) return r.status === "0x1";
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  return null; // 状态未知，不重发
+}
+async function approveAmt(amt) {
+  const data = SEL.approve + pad(ROUTER) + word(amt);
+  log("发送授权：" + fmtUnits(amt, token.dec) + " " + token.symbol + " → Router");
+  const h = await sendTx(token.addr, data);
+  const ok = await waitReceipt(h);
+  if (ok === false) { log("授权交易失败", "err"); throw new Error("approve failed"); }
+  if (ok === null) { log("授权状态未知，先查 BscScan 再决定，不要重复授权", "err"); throw new Error("approve unknown"); }
+  log("授权成功", "ok");
+  await refreshPosition();
+}
+
+// ---------- 卖出 calldata ----------
+function buildSwap(amtIn, minOut, deadline) {
+  if (pairInfo.base === "BNB") {
+    return SEL.swapTokensForETHFoT + word(amtIn) + word(minOut) + word(160n) + pad(account) + word(BigInt(deadline)) + word(2n) + pad(token.addr) + pad(WBNB);
+  }
+  return SEL.swapTokensForTokensFoT + word(amtIn) + word(minOut) + word(160n) + pad(account) + word(BigInt(deadline)) + word(2n) + pad(token.addr) + pad(pairInfo.baseAddr);
+}
+async function prepareSell() {
+  if (!token || !pairInfo) throw new Error("先识别合约");
+  if (!account) await ensureWallet();
+  const c = currentAmounts();
+  if (!c || c.amtIn <= 0n) throw new Error("先填卖出数量");
+  if (c.amtIn > myBal) throw new Error("数量超过持仓");
+  const q = await quote(c.amtIn);
+  if (!q || q === 0n) throw new Error("当前无报价（池子没开或没流动性）");
+  const { exp, min } = minOutFor(q, c.tax, c.slip);
+  const deadline = Math.floor(Date.now() / 1000) + Math.max(30, Number($("deadSec").value || 180));
+  return { amtIn: c.amtIn, q, exp, min, data: buildSwap(c.amtIn, min, deadline) };
+}
+
+// ---------- 按钮 ----------
+$("btnDetect").onclick = () => detect().catch(e => log("识别异常：" + e.message, "err"));
+document.querySelectorAll("[data-pct]").forEach(b => b.onclick = () => {
+  if (!token) return;
+  const p = BigInt(b.dataset.pct);
+  $("sellAmt").value = fmtUnits(myBal * p / 100n, token.dec);
+  tickQuote().catch(() => {});
+});
+$("btnApprove").onclick = async () => {
+  try {
+    if (!token) throw new Error("先识别合约");
+    if (!account) await ensureWallet();
+    const c = currentAmounts();
+    if (!c || c.amtIn <= 0n) throw new Error("先填卖出数量（授权按这个量）");
+    await approveAmt(c.amtIn);
+  } catch (e) { log("授权中止：" + e.message, "err"); }
+};
+$("btnDry").onclick = async () => {
+  try {
+    const p = await prepareSell();
+    log("预演：卖 " + fmtUnits(p.amtIn, token.dec) + " " + token.symbol + "，报价 " + fmtUnits(p.q, pairInfo.baseDec) + " " + pairInfo.base + "，最小到账 " + fmtUnits(p.min, pairInfo.baseDec));
+    await ethCall(ROUTER, p.data, account);
+    log("预演通过：这笔现在发出去能成交", "ok");
+  } catch (e) { log("预演不通过：" + e.message, "err"); }
+};
+async function fire() {
+  if (firing) return; firing = true;
+  $("btnFire").disabled = true;
+  try {
+    const p = await prepareSell();
+    if (myAllow < p.amtIn) { log("授权不足，先自动授权"); await approveAmt(p.amtIn); }
+    log("开火：卖 " + fmtUnits(p.amtIn, token.dec) + " " + token.symbol + " → 预计 " + fmtUnits(p.exp, pairInfo.baseDec) + " " + pairInfo.base + "，最小 " + fmtUnits(p.min, pairInfo.baseDec));
+    const h = await sendTx(ROUTER, p.data);
+    const ok = await waitReceipt(h);
+    if (ok === true) { log("成交！已卖出，去钱包或 BscScan 核对到账", "ok"); }
+    else if (ok === false) { log("交易上链但失败（可能滑点不够或被抢跑），没有重复发送", "err"); }
+    else { log("状态未知：不要重复点开火，先在 BscScan 查这笔哈希", "err"); }
+    await refreshPosition(); await refreshWallet();
+  } catch (e) { log("开火中止：" + e.message, "err"); }
+  firing = false; $("btnFire").disabled = false;
+}
+$("btnFire").onclick = fire;
+
+// 定时开火
+let timerId = null;
+$("btnTimer").onclick = () => {
+  const v = $("fireAt").value;
+  if (!v) { log("先选定时时间", "err"); return; }
+  const target = new Date(v).getTime();
+  if (timerId) clearInterval(timerId);
+  $("timerState").textContent = "已定到 " + v.replace("T", " ");
+  log("定时开火已设：" + v.replace("T", " "));
+  timerId = setInterval(() => {
+    if (Date.now() >= target) { clearInterval(timerId); timerId = null; $("timerState").textContent = "已触发"; log("定时到点，开火", "ok"); fire(); }
+  }, 250);
+};
+$("openArm").onchange = () => { $("openState").textContent = $("openArm").checked ? "已布防，1 秒一扫" : ""; if ($("openArm").checked) log("开盘触发已布防：一有报价立刻卖"); };
+
+// 自定义 calldata
+$("btnCd").onclick = async () => {
+  try {
+    if (!account) await ensureWallet();
+    const to = $("cdTo").value.trim(), data = $("cdData").value.trim();
+    if (!/^0x[0-9a-fA-F]{40}$/.test(to) || !/^0x[0-9a-fA-F]*$/.test(data)) throw new Error("地址或 calldata 格式不对");
+    const valBNB = $("cdVal").value.trim();
+    const valHex = "0x" + parseUnits(valBNB || "0", 18).toString(16);
+    const h = await sendTx(to, data, valHex);
+    const ok = await waitReceipt(h);
+    log(ok === true ? "自定义交易成功" : ok === false ? "自定义交易失败" : "自定义交易状态未知，别重发", ok === true ? "ok" : "err");
+  } catch (e) { log("自定义交易中止：" + e.message, "err"); }
+};
+
+log("面板已加载。顺序：连接钱包 → 粘贴合约识别 → 填量 → 提前授权 → 立即开火。");
+</script>
+</body>
+</html>
